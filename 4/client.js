@@ -9,7 +9,7 @@ const rl = readline.createInterface({
   prompt: "> ",
 });
 
-let targetUsername = "";
+let registeredUsername = "";
 let username = "";
 const users = new Map();
 
@@ -18,6 +18,7 @@ socket.on("connect", () => {
 
   rl.question("Enter your username: ", (input) => {
     username = input;
+    registeredUsername = input;
     console.log(`Welcome, ${username} to the chat`);
 
     socket.emit("registerPublicKey", {
@@ -28,12 +29,12 @@ socket.on("connect", () => {
 
     rl.on("line", (message) => {
       if (message.trim()) {
-        if ((match = message.match(/^!secret (\w+)$/))) {
-          targetUsername = match[1];
-          console.log(`Now secretly chatting with ${targetUsername}`);
+        if ((match = message.match(/^!impersonate (\w+)$/))) {
+          username = match[1];
+          console.log(`Now impersonating as ${username}`);
         } else if (message.match(/^!exit$/)) {
-          console.log(`No more secretly chatting with ${targetUsername}`);
-          targetUsername = "";
+          username = registeredUsername;
+          console.log(`Now you are ${username}`);
         } else {
           socket.emit("message", { username, message });
         }
