@@ -1,23 +1,16 @@
-const http = require("http");
-const socketIo = require("socket.io");
+const { createServer } = require("http");
+const { Server } = require("socket.io");
 
-const server = http.createServer();
-const io = socketIo(server);
+const io = new Server(createServer().listen(3000, () => {
+  console.log("Server running on port 3000");
+}));
 
-io.on("connection", (socket) => {
-  console.log(`Client ${socket.id} connected`);
+io.on("connection", (client) => {
+  console.log(`Client ${client.id} connected`);
 
-  socket.on("message", (data) => {
-    const tamperedMessage = `${data.message} (sus?)`;
-    io.emit("message", { ...data, message: tamperedMessage });
+  client.on("message", (packet) => {
+    io.emit("message", { ...packet, message: `${packet.message} (sus?)` });
   });
 
-  socket.on("disconnect", () => {
-    console.log(`Client ${socket.id} disconnected`);
-  });
-});
-
-const port = 3000;
-server.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+  client.on("disconnect", () => console.log(`Client ${client.id} disconnected`));
 });

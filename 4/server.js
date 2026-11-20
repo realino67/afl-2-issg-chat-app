@@ -1,32 +1,22 @@
-const http = require("http");
-const socketIo = require("socket.io");
+const { createServer } = require("http");
+const { Server } = require("socket.io");
 
-const server = http.createServer();
-const io = socketIo(server);
+const io = new Server(createServer().listen(3000, () => {
+  console.log("Server running on port 3000");
+}));
 
-const users = new Map();
+const publicKeyStore = new Map();
 
-io.on("connection", (socket) => {
-  console.log(`Client ${socket.id} connected`);
+io.on("connection", (client) => {
+  console.log(`Client ${client.id} connected`);
+  client.emit("init", Array.from(publicKeyStore.entries()));
 
-  socket.emit("init", Array.from(users.entries()));
-
-  socket.on("registerPublicKey", ({ username, publicKey }) => {
-    users.set(username, publicKey);
+  client.on("registerPublicKey", ({ username, publicKey }) => {
+    publicKeyStore.set(username, publicKey);
     console.log(`${username} registered with public key.`);
     io.emit("newUser", { username, publicKey });
   });
 
-  socket.on("message", (data) => {
-    io.emit("message", data);
-  });
-
-  socket.on("disconnect", () => {
-    console.log(`Client ${socket.id} disconnected`);
-  });
-});
-
-const port = 3000;
-server.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+  client.on("message", (packet) => io.emit("message", packet));
+  client.on("disconnect", () => console.log(`Client ${client.id} disconnected`));
 });
