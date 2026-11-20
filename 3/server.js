@@ -11,17 +11,14 @@ io.on("connection", (socket) => {
 
   socket.emit("init", Array.from(users.entries()));
 
-  socket.on("registerPublicKey", (data) => {
-    const { username, publicKey } = data;
+  socket.on("registerPublicKey", ({ username, publicKey }) => {
     users.set(username, publicKey);
     console.log(`${username} registered with public key.`);
-
     io.emit("newUser", { username, publicKey });
   });
 
   socket.on("message", (data) => {
-    const { username, message } = data;
-    io.emit("message", { username, message });
+    io.emit("message", data);
   });
 
   socket.on("disconnect", () => {

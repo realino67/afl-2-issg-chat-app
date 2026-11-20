@@ -2,8 +2,6 @@ const io = require("socket.io-client");
 const readline = require("readline");
 const crypto = require("crypto");
 
-const SHARED_SECRET = "my-super-secret-key";
-
 const socket = io("http://localhost:3000");
 
 const rl = readline.createInterface({
@@ -14,39 +12,25 @@ const rl = readline.createInterface({
 
 let username = "";
 
-const HASH_LENGTH = 64;
-
-function computeHash(user, text) {
-  return crypto.createHmac("sha256", SHARED_SECRET).update(JSON.stringify([user, text])).digest("hex");
-}
-
-function wrapMessage(user, text) {
-  return computeHash(user, text) + text;
-}
-
-function unwrapMessage(user, wrapped) {
-  if (typeof wrapped !== "string" || wrapped.length < HASH_LENGTH) {
-    return { text: String(wrapped), valid: false };
-  }
-  const receivedHash = wrapped.slice(0, HASH_LENGTH);
-  const text = wrapped.slice(HASH_LENGTH);
-  const valid = computeHash(user, text) === receivedHash;
-  return { text, valid };
+function generateHash(content) {
+  return crypto.createHash("sha256").update(content, "utf8").digest("hex");
 }
 
 socket.on("connect", () => {
   console.log("Connected to the server");
 
   rl.question("Enter your username: ", (input) => {
-    username = input;
+    username = input.trim();
     console.log(`Welcome, ${username} to the chat`);
     rl.prompt();
 
-    rl.on("line", (message) => {
-      if (message.trim()) {
+    rl.on("line", (line) => {
+      const text = line.trim();
+      if (text) {
         socket.emit("message", {
           username,
-          message: wrapMessage(username, message),
+          message: text,
+          digest: generateHash(text),
         });
       }
       rl.prompt();
@@ -55,17 +39,16 @@ socket.on("connect", () => {
 });
 
 socket.on("message", (data) => {
-  const { username: senderUsername, message: wrapped } = data;
-  if (senderUsername !== username) {
-    const { text, valid } = unwrapMessage(senderUsername, wrapped);
-    console.log(`${senderUsername}: ${text}`);
-    if (!valid) {
-      console.log(
-        "⚠️  WARNING: the message may have been changed during transmission"
-      );
-    }
-    rl.prompt();
+  const { username: sender, message: body, digest } = data;
+  if (sender === username) return;
+
+  const expectedHash = generateHash(body);
+  if (digest && expectedHash === digest) {
+    console.log(`${sender}: ${body}`);
+  } else {
+    console.log(`[ALERT] Message integrity check failed! ${sender}: ${body}`);
   }
+  rl.prompt();
 });
 
 socket.on("disconnect", () => {

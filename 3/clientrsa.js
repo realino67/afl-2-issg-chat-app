@@ -10,7 +10,7 @@ const rl = readline.createInterface({
   prompt: "> ",
 });
 
-const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", {
+const keyPair = crypto.generateKeyPairSync("rsa", {
   modulusLength: 2048,
   publicKeyEncoding: { type: "spki", format: "pem" },
   privateKeyEncoding: { type: "pkcs8", format: "pem" },
@@ -20,105 +20,91 @@ let registeredUsername = "";
 let username = "";
 const users = new Map();
 
-function sign(user, text) {
-  return crypto
-    .sign("sha256", Buffer.from(JSON.stringify([user, text])), privateKey)
-    .toString("base64");
+function createMessageSignature(sender, text) {
+  const signer = crypto.createSign("RSA-SHA256");
+  signer.update(`${sender}:${text}`);
+  signer.end();
+  return signer.sign(keyPair.privateKey, "hex");
 }
 
-function verify(user, text, signature) {
-  const key = users.get(user);
-  if (!key) return false;
+function isSignatureValid(sender, text, signature) {
+  const senderPublicKey = users.get(sender);
+  if (!senderPublicKey || !signature) return false;
+
   try {
-    return crypto.verify(
-      "sha256",
-      Buffer.from(JSON.stringify([user, text])),
-      key,
-      Buffer.from(signature, "base64")
-    );
-  } catch (err) {
+    const verifier = crypto.createVerify("RSA-SHA256");
+    verifier.update(`${sender}:${text}`);
+    verifier.end();
+    return verifier.verify(senderPublicKey, signature, "hex");
+  } catch {
     return false;
   }
-}
-
-function wrapMessage(user, text) {
-  return sign(user, text) + "|" + text;
-}
-
-function unwrapMessage(user, wrapped) {
-  const idx = typeof wrapped === "string" ? wrapped.indexOf("|") : -1;
-  if (idx === -1) {
-    return { text: String(wrapped), valid: false };
-  }
-  const signature = wrapped.slice(0, idx);
-  const text = wrapped.slice(idx + 1);
-  return { text, valid: verify(user, text, signature) };
 }
 
 socket.on("connect", () => {
   console.log("Connected to the server");
 
   rl.question("Enter your username: ", (input) => {
-    username = input;
-    registeredUsername = input;
+    username = input.trim();
+    registeredUsername = username;
     console.log(`Welcome, ${username} to the chat`);
 
-    users.set(username, publicKey);
-    socket.emit("registerPublicKey", { username, publicKey });
+    users.set(username, keyPair.publicKey);
+    socket.emit("registerPublicKey", {
+      username,
+      publicKey: keyPair.publicKey,
+    });
     rl.prompt();
 
-    rl.on("line", (message) => {
-      if (message.trim()) {
-        let match;
-        if ((match = message.match(/^!impersonate (\w+)$/))) {
-          username = match[1];
-          console.log(`Now impersonating as ${username}`);
-        } else if (message.match(/^!exit$/)) {
-          username = registeredUsername;
-          console.log(`Now you are ${username}`);
-        } else {
-          socket.emit("message", {
-            username,
-            message: wrapMessage(username, message),
-          });
-        }
+    rl.on("line", (line) => {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        rl.prompt();
+        return;
+      }
+
+      const impersonateMatch = trimmed.match(/^!impersonate (\w+)$/);
+      if (impersonateMatch) {
+        username = impersonateMatch[1];
+        console.log(`Now impersonating as ${username}`);
+      } else if (trimmed === "!exit") {
+        username = registeredUsername;
+        console.log(`Now you are ${username}`);
+      } else {
+        const signature = createMessageSignature(username, trimmed);
+        socket.emit("message", {
+          username,
+          message: trimmed,
+          signature,
+        });
       }
       rl.prompt();
     });
   });
 });
 
-socket.on("init", (keys) => {
-  keys.forEach(([user, key]) => users.set(user, key));
+socket.on("init", (entries) => {
+  entries.forEach(([user, key]) => users.set(user, key));
   console.log(`\nThere are currently ${users.size} users in the chat`);
   rl.prompt();
 });
 
-socket.on("newUser", (data) => {
-  const { username: newUsername, publicKey: newKey } = data;
-  if (users.has(newUsername) && users.get(newUsername) !== newKey) {
-    console.log(
-      `\n⚠️  WARNING: someone tried to register as "${newUsername}" with a different key`
-    );
-    rl.prompt();
-    return;
-  }
-
-  users.set(newUsername, newKey);
-  console.log(`\n${newUsername} join the chat`);
+socket.on("newUser", ({ username: newUser, publicKey }) => {
+  users.set(newUser, publicKey);
+  console.log(`${newUser} joined the chat`);
   rl.prompt();
 });
 
-socket.on("message", (data) => {
-  const { username: senderUsername, message: wrapped } = data;
-  if (senderUsername !== username) {
-    const { text, valid } = unwrapMessage(senderUsername, wrapped);
-    console.log(`${senderUsername}: ${text}`);
-    if (!valid) {
-      console.log("⚠️  WARNING: this user is fake");
-    }
-    rl.prompt();
+socket.on("message", ({ username: sender, message: text, signature }) => {
+  if (sender === username) return;
+
+  const authentic = isSignatureValid(sender, text, signature);
+  if (authentic) {
+    console.log(`${sender}: ${text}`);
+  } else {
+    console.log(`${sender}: ${text} -> [WARNING: this user is fake]`);
   }
+  rl.prompt();
 });
 
 socket.on("disconnect", () => {

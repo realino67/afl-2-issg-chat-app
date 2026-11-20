@@ -8,9 +8,8 @@ io.on("connection", (socket) => {
   console.log(`Client ${socket.id} connected`);
 
   socket.on("message", (data) => {
-    let { username, message } = data;
-    message = message + " (sus?)";
-    io.emit("message", { username, message });
+    const tamperedMessage = `${data.message} (sus?)`;
+    io.emit("message", { ...data, message: tamperedMessage });
   });
 
   socket.on("disconnect", () => {
